@@ -1,0 +1,29 @@
+{
+  "wallet": "0x0000000000000000000000000000000000000000",
+  "checkIntervalSeconds": 300,
+  "sources": [
+    {
+      "name": "Project X",
+      "type": "subgraph",
+      "enabled": false,
+      "url": "https://api.goldsky.com/api/public/project_cmbbm2iwckb1b01t39xed236t/subgraphs/uniswap-v3-hyperevm-position/prod/gn",
+      "notes": "Project X V3 position subgraph discovered from the public prjx.com frontend bundle. Uses the default Uniswap V3 positions query."
+    },
+    {
+      "name": "HyperSwap",
+      "type": "subgraph",
+      "enabled": false,
+      "url": "https://api.subgraph.ormilabs.com/api/public/33c67399-d625-4929-b239-5709cd66e422/subgraphs/hyperswap-v3/v0.1.2/gn",
+      "notes": "Official HyperSwap V3 subgraph from HyperSwap developer docs. Uses scalar tickLower/tickUpper fields. USD size is shown only if price data is available.",
+      "query": "\n  query Positions($owner: String!) {\n    positions(where: { owner: $owner, liquidity_gt: \"0\" }) {\n      id\n      owner\n      liquidity\n      depositedToken0\n      depositedToken1\n      withdrawnToken0\n      withdrawnToken1\n      tickLower\n      tickUpper\n      token0 {\n        symbol\n      }\n      token1 {\n        symbol\n      }\n      pool {\n        id\n        tick\n        token0 {\n          symbol\n        }\n        token1 {\n          symbol\n        }\n      }\n    }\n  }\n"
+    },
+    {
+      "name": "Nest",
+      "type": "api",
+      "enabled": false,
+      "url": "https://app.usenest.xyz/api/blaze/user-positions/{wallet}",
+      "notes": "Nest Blaze user positions API. Enable after confirming the endpoint is still public.",
+      "parser": "nest"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "name": "hyperevm_pool_tracker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node src/monitor.js --once",
+    "monitor": "node src/monitor.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
