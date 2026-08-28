@@ -76,7 +76,7 @@ async function main() {
     return;
   }
 
-  await runCheck(config);
+  await runCheck(config).catch((error) => console.error("[monitor] check failed:", error));
   setInterval(() => {
     runCheck(config).catch((error) => console.error("[monitor] check failed:", error));
   }, intervalMs);
@@ -110,21 +110,22 @@ async function runCheck(config) {
 
   enrichPositionUsdSizes(allPositions);
   const holdingsSummary = formatHoldingsSummary(allPositions);
-  console.log(holdingsSummary);
   const holdingsMessage = formatHoldingsTelegramMessage(holdingsSummary, allPositions, nestRewards);
+  console.log(`\n${formatTerminalMessage(holdingsMessage)}\n`);
   const alerts = diffState(state, allPositions);
   writeState(statePath, state);
 
   if (dryRun) {
-    console.log("[dry-run telegram]", holdingsMessage);
+    console.log("[dry-run] Telegram send skipped.");
   } else {
     await sendTelegram(holdingsMessage);
   }
 
   for (const alert of alerts) {
     const message = formatTelegramMessage(alert, holdingsSummary);
+    console.log(`\n${formatTerminalMessage(message)}\n`);
     if (dryRun) {
-      console.log("[dry-run telegram]", message);
+      console.log("[dry-run] Telegram alert send skipped.");
     } else {
       await sendTelegram(message);
     }
@@ -578,6 +579,14 @@ function formatHoldingsTelegramMessage(holdingsSummary, positions, nestRewards =
   return sections.join("\n");
 }
 
+function formatTerminalMessage(message) {
+  return message
+    .replaceAll(/<\/?(?:b|code)>/g, "")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&amp;", "&");
+}
+
 function formatHoldingsTelegramSection(holdingsSummary) {
   const lines = holdingsSummary.split("\n");
   return [
@@ -735,16 +744,62 @@ async function sendTelegram(text) {
     throw new Error("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID in .env");
   }
 
-  const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML", disable_web_page_preview: true })
-  });
+  const url = `https://api.telegram.org/bot${token}/sendMessage`;
+  const body = JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML", disable_web_page_preview: true });
+  const maxAttempts = 4;
+  const configuredTimeoutSeconds = Number(process.env.TELEGRAM_TIMEOUT_SECONDS || 30);
+  const timeoutMs = Number.isFinite(configuredTimeoutSeconds) && configuredTimeoutSeconds > 0
+    ? configuredTimeoutSeconds * 1000
+    : 30_000;
 
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Telegram send failed: HTTP ${response.status} ${body}`);
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+        signal: AbortSignal.timeout(timeoutMs)
+      });
+
+      if (response.ok) return;
+
+      const responseBody = await response.text();
+      const retryable = response.status === 429 || response.status >= 500;
+      if (!retryable || attempt === maxAttempts) {
+        throw new Error(`Telegram send failed: HTTP ${response.status} ${responseBody}`);
+      }
+
+      const retryAfterMs = getTelegramRetryAfterMs(response, responseBody);
+      const delayMs = retryAfterMs ?? 1_000 * 2 ** (attempt - 1);
+      console.warn(`[telegram] HTTP ${response.status}; retrying in ${delayMs}ms (${attempt}/${maxAttempts})`);
+      await sleep(delayMs);
+    } catch (error) {
+      const isHttpError = error instanceof Error && error.message.startsWith("Telegram send failed: HTTP");
+      if (isHttpError || attempt === maxAttempts) throw error;
+
+      const delayMs = 1_000 * 2 ** (attempt - 1);
+      console.warn(`[telegram] ${error.message}; retrying in ${delayMs}ms (${attempt}/${maxAttempts})`);
+      await sleep(delayMs);
+    }
   }
+}
+
+function getTelegramRetryAfterMs(response, responseBody) {
+  const retryAfterHeader = response.headers.get("retry-after");
+  const headerSeconds = retryAfterHeader === null ? NaN : Number(retryAfterHeader);
+  if (Number.isFinite(headerSeconds) && headerSeconds >= 0) return headerSeconds * 1000;
+
+  try {
+    const data = JSON.parse(responseBody);
+    const seconds = Number(data?.parameters?.retry_after);
+    return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function rawTokenAmountToNumber(rawAmount, decimals = 18) {
