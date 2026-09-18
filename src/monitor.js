@@ -346,6 +346,9 @@ function extractNestPositions(data, sourceName) {
 
   return data
     .map((raw) => {
+      const automaticPosition = extractNestAutomaticPosition(raw, sourceName);
+      if (automaticPosition) return automaticPosition;
+
       const liquidity = readNumber(raw, ["v3.liquidity", "liquidity"]);
       if (Number.isFinite(liquidity) && liquidity <= 0) return null;
 
@@ -403,6 +406,74 @@ function extractNestPositions(data, sourceName) {
       };
     })
     .filter(Boolean);
+}
+
+function extractNestAutomaticPosition(raw, sourceName) {
+  const external = raw.external;
+  if (!external || !isNestAutomaticPosition(raw)) return null;
+
+  const allowedSymbol = getNestAutomaticAllowedSymbol(raw);
+  if (!isTrackedNestAutomaticAsset(allowedSymbol)) return null;
+
+  const token0Symbol = readString(raw, ["token0.basetoken.symbol", "token0.symbol"]);
+  const token1Symbol = readString(raw, ["token1.basetoken.symbol", "token1.symbol"]);
+  const poolAddress = readString(raw, ["poolAddress"]);
+  const vaultAddress = readString(external, ["vault"]);
+  const pairName = buildPairName(raw);
+  const label = `[${allowedSymbol}]`;
+
+  return {
+    key: `${sourceName}:automatic:${vaultAddress || poolAddress || `${pairName}:${allowedSymbol}`}`,
+    sourceName,
+    poolAddress,
+    poolName: pairName ? `${pairName} (${label})` : label,
+    lowerTick: undefined,
+    upperTick: undefined,
+    currentTick: undefined,
+    lowerPrice: undefined,
+    upperPrice: undefined,
+    currentPrice: undefined,
+    apr: readNumber(raw, ["apr", "currentApr", "currentAPR", "aprPercent"]),
+    sizeUsd: readNumber(raw, ["tvl", "valueUSD", "usdValue", "positionUsd", "totalValueUSD"]),
+    sizeUsdEstimated: false,
+    token0Symbol,
+    token1Symbol,
+    token0Amount: readNumber(raw, ["token0Balance.amount"]),
+    token1Amount: readNumber(raw, ["token1Balance.amount"]),
+    token0Usd: readNumber(raw, ["token0.priceUSD", "token0.usdPrice", "token0PriceUSD"]),
+    token1Usd: readNumber(raw, ["token1.priceUSD", "token1.usdPrice", "token1PriceUSD"]),
+    outOfRange: false,
+    rawStatus: "automatic",
+    positionType: "automatic"
+  };
+}
+
+function isNestAutomaticPosition(raw) {
+  const external = raw.external;
+  if (!external) return false;
+  const type = readString(external, ["type"]) || readString(raw, ["type"]);
+  const title = readString(external, ["title"]);
+  return /ichi|automatic/i.test(type || "") || /automated|automatic/i.test(title || "");
+}
+
+function getNestAutomaticAllowedSymbol(raw) {
+  const allowedToken = readString(raw, ["external.allowedToken"]);
+  const token0Address = readString(raw, ["token0.tokenAddress", "token0.basetoken.address"]);
+  const token1Address = readString(raw, ["token1.tokenAddress", "token1.basetoken.address"]);
+  if (allowedToken && token0Address && allowedToken.toLowerCase() === token0Address.toLowerCase()) {
+    return readString(raw, ["token0.basetoken.symbol", "token0.symbol"]);
+  }
+  if (allowedToken && token1Address && allowedToken.toLowerCase() === token1Address.toLowerCase()) {
+    return readString(raw, ["token1.basetoken.symbol", "token1.symbol"]);
+  }
+
+  const title = readString(raw, ["external.title"]);
+  const match = title?.match(/deposit\s+([A-Za-z0-9]+)/i);
+  return match?.[1];
+}
+
+function isTrackedNestAutomaticAsset(symbol) {
+  return ["UBTC", "WHYPE", "HYPE"].includes(String(symbol || "").toUpperCase());
 }
 
 function extractPositions(data, sourceName) {
@@ -678,7 +749,9 @@ function formatRewardUsd(valueUsd, hasUsd) {
 function formatPoolLines(positions) {
   if (positions.length === 0) return "🏊 <b>Pools:</b> none";
   const lines = positions.map((position) => {
-    const status = position.outOfRange ? "🔴 <b>CLOSED</b>" : "🟢 <b>OPEN</b>";
+    const status = position.positionType === "automatic"
+      ? "🟣 <b>AUTOMATIC</b>"
+      : position.outOfRange ? "🔴 <b>CLOSED</b>" : "🟢 <b>OPEN</b>";
     const poolName = escapeHtml(position.poolName || position.poolAddress || "unknown");
     const sourceName = escapeHtml(position.sourceName || "unknown");
     const size = Number.isFinite(position.sizeUsd) ? formatUsd(position.sizeUsd) + (position.sizeUsdEstimated ? " est." : "") : "n/a";

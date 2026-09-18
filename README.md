@@ -45,6 +45,8 @@ Sources can be simple JSON APIs or GraphQL subgraphs. For Uniswap V3-style subgr
 
 The monitor sends a default positions query using the configured wallet as the lowercase `owner` variable and reads `tickLower.tickIdx`, `tickUpper.tickIdx`, and `pool.tick` to decide whether each position is out of range.
 
+For Nest, it also includes Ichi/Automatic positions when the asset accepted for a one-sided deposit is `UBTC`, `WHYPE`, or `HYPE`. These are marked `AUTOMATIC` in the report and are included in the value, APR, and holdings totals. Automatic pools do not have a user-defined price range, so they do not trigger out-of-range alerts.
+
 ## Telegram
 
 Create a bot with `@BotFather`, then get your chat id by sending the bot any message and opening:
